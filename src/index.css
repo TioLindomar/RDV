@@ -1,0 +1,88 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --background: 167 36% 80%; /* #8cc9bb - Light green */
+  --foreground: 222.2 47.4% 11.2%; /* Adjusted for contrast on light background */
+  --card: 0 0% 100%; /* White for cards on light background */
+  --card-foreground: 222.2 47.4% 11.2%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222.2 47.4% 11.2%;
+  --primary: 211 74% 49%; /* #4A90E2 - Azul suave */
+  --primary-foreground: 0 0% 100%; /* White text on primary */
+  --secondary: 167 65% 59%; /* #50E3C2 - Verde menta */
+  --secondary-foreground: 0 0% 100%;
+  --muted: 210 40% 96.1%; /* A light gray for muted elements */
+  --muted-foreground: 215 10.2% 65.1%;
+  --accent: 33 90% 55%; /* #F5A623 - Laranja claro */
+  --accent-foreground: 0 0% 100%;
+  --destructive: 0 84.2% 60.2%;
+  --destructive-foreground: 0 0% 100%;
+  --border: 214.3 31.8% 91.4%;
+  --input: 214.3 31.8% 91.4%;
+  --ring: 211 74% 49%;
+  --radius: 0.5rem;
+}
+
+* {
+  border-color: hsl(var(--border));
+}
+
+body {
+  background: hsl(var(--background));
+  font-family: 'Inter', sans-serif;
+  color: hsl(var(--foreground));
+  min-height: 100vh;
+}
+
+.glass-effect {
+  background: rgba(255, 255, 255, 0.6); /* Slightly more transparent glass effect */
+  backdrop-filter: blur(10px); /* Increased blur for smoother effect */
+  border: 1px solid rgba(255, 255, 255, 0.7); /* Slightly stronger border for definition */
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.15); /* More prominent shadow for depth */
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, hsl(var(--primary)) 0%, hsl(var(--secondary)) 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.floating-animation {
+  animation: float 8s ease-in-out infinite; /* Slower and smoother float */
+}
+
+@keyframes float {
+  0%, 100% { transform: translateY(0px) rotate(0deg); }
+  25% { transform: translateY(-15px) translateX(10px) rotate(5deg); }
+  50% { transform: translateY(-30px) translateX(-10px) rotate(-5deg); }
+  75% { transform: translateY(-15px) translateX(10px) rotate(5deg); }
+}
+
+.pulse-glow {
+  animation: pulse-glow 2s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { box-shadow: 0 0 20px rgba(74, 144, 226, 0.4); } /* Using new primary color */
+  50% { box-shadow: 0 0 40px rgba(74, 144, 226, 0.8); }
+}
+
+@media print {
+  body {
+    background: white !important;
+    color: black !important;
+  }
+  
+  .no-print {
+    display: none !important;
+  }
+  
+  .print-only {
+    display: block !important;
+  }
+}
