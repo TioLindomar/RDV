@@ -1,5 +1,4 @@
-
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
@@ -7,35 +6,50 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter } from '@/components/ui/card';
 import { toast } from '@/components/ui/use-toast';
-import { ArrowLeft, Save, Camera, Eye, EyeOff, Trash2, Loader2, Info } from 'lucide-react';
-import { formatCPF, validateCPF, brazilianStates } from '@/lib/utils';
+import { ArrowLeft, Save, Loader2, Info } from 'lucide-react';
+import { brazilianStates } from '@/lib/utils';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
+
+// Máscaras locais
+const maskPhone = (v) => v.replace(/\D/g, '').replace(/^(\d{2})(\d)/g, '($1) $2').replace(/(\d)(\d{4})$/, '$1-$2').slice(0, 15);
+const maskCEP = (v) => v.replace(/\D/g, '').replace(/^(\d{5})(\d)/, '$1-$2').slice(0, 9);
+const maskCpfCnpj = (v) => {
+  const val = v.replace(/\D/g, '');
+  if (val.length <= 11) return val.replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d)/, '$1.$2').replace(/(\d{3})(\d{1,2})/, '$1-$2').slice(0, 14);
+  return val.replace(/^(\d{2})(\d)/, '$1.$2').replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3').replace(/\.(\d{3})(\d)/, '.$1/$2').replace(/(\d{4})(\d)/, '$1-$2').slice(0, 18);
+};
 
 const ProfileSettings = () => {
   const navigate = useNavigate();
   const { session } = useAuth();
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [loadingCep, setLoadingCep] = useState(false);
   
-  const [user, setUser] = useState({});
-  const [crmvState, setCrmvState] = useState('');
-  const [crmvNumber, setCrmvNumber] = useState('');
-  const [sipegro, setSipegro] = useState('');
-  const [profilePic, setProfilePic] = useState(null);
-  const [phone, setPhone] = useState('');
-  const [specialty, setSpecialty] = useState('');
-  
-  const fileInputRef = useRef(null);
+  const [formData, setFormData] = useState({
+    name: '',
+    email: '',
+    phone: '',
+    cpf_cnpj: '',
+    crmvState: '',
+    crmvNumber: '',
+    sipegro: '',
+    clinic_name: '',
+    cep: '',
+    address: '',
+    number: '',
+    neighborhood: '',
+    city: '',
+    state: ''
+  });
 
+  // 1. Carregar dados do Supabase
   useEffect(() => {
     const fetchProfile = async () => {
       setIsLoading(true);
-      let loadedData = {};
-
-      // 1. Try to get from Supabase first
       if (session?.user?.id) {
         const { data, error } = await supabase
           .from('profiles')
@@ -44,196 +58,133 @@ const ProfileSettings = () => {
           .maybeSingle();
         
         if (data) {
-          loadedData = {
-            ...data,
-            email: session.user.email // Email comes from auth
-          };
-        } else if (error) {
-          console.error('Error fetching profile:', error);
-        }
-      }
-
-      // 2. Fallback to LocalStorage if Supabase is empty or failed
-      if (!loadedData.name) {
-        const localUser = JSON.parse(localStorage.getItem('rdv_user') || '{}');
-        if (localUser.name) {
-           loadedData = { ...localUser, ...loadedData };
-        }
-      }
-
-      // Set state
-      setUser(loadedData);
-      setSipegro(loadedData.sipegro || '');
-      setProfilePic(loadedData.profile_pic_url || loadedData.profilePic || null);
-      setPhone(loadedData.phone || '');
-      setSpecialty(loadedData.specialty || '');
-      
-      // Improved CRMV Parsing
-      if (loadedData.crmv) {
-        // Handle standard format "CRMV-UF 12345"
-        const standardMatch = loadedData.crmv.match(/CRMV-([A-Z]{2})\s+(.+)/);
-        if (standardMatch) {
-          setCrmvState(standardMatch[1]);
-          setCrmvNumber(standardMatch[2]);
-        } else {
-            // Fallback for non-standard formats, try to just split by space if contains CRMV-
-            const parts = loadedData.crmv.replace('CRMV-', '').trim().split(' ');
-            if (parts.length >= 2) {
-                setCrmvState(parts[0].toUpperCase());
-                setCrmvNumber(parts.slice(1).join(' '));
-            } else if (parts.length === 1 && parts[0]) {
-                 setCrmvNumber(parts[0]);
+          // Lógica para separar o CRMV
+          let crmvState = '';
+          let crmvNumber = '';
+          if (data.crmv) {
+            const match = data.crmv.match(/CRMV-([A-Z]{2})\s+(.+)/);
+            if (match) {
+              crmvState = match[1];
+              crmvNumber = match[2];
+            } else {
+              crmvNumber = data.crmv;
             }
+          }
+
+          setFormData({
+            name: data.name || '',
+            email: data.email || session.user.email,
+            phone: data.phone || '',
+            cpf_cnpj: data.cpf_cnpj || '',
+            crmvState: crmvState,
+            crmvNumber: crmvNumber,
+            sipegro: data.sipegro || '',
+            clinic_name: data.clinic_name || '',
+            cep: data.cep || '',
+            address: data.address || '',
+            number: data.number || '',
+            neighborhood: data.neighborhood || '',
+            city: data.city || '',
+            state: data.state || ''
+          });
+        } else if (error) {
+          console.error('Erro ao buscar perfil:', error);
+          toast({ variant: "destructive", title: "Erro", description: "Não foi possível carregar seus dados." });
         }
       }
-      
       setIsLoading(false);
     };
 
     fetchProfile();
   }, [session]);
 
-  const handleInputChange = e => {
+  // 2. Manipuladores de Input
+  const handleChange = (e) => {
     const { id, value } = e.target;
-    if (id === 'cpf') {
-      setUser(prevUser => ({
-        ...prevUser,
-        [id]: formatCPF(value)
-      }));
-    } else {
-      setUser(prevUser => ({
-        ...prevUser,
-        [id]: value
-      }));
-    }
+    let finalValue = value;
+    
+    if (id === 'phone') finalValue = maskPhone(value);
+    if (id === 'cep') finalValue = maskCEP(value);
+    if (id === 'cpf_cnpj') finalValue = maskCpfCnpj(value);
+
+    setFormData(prev => ({ ...prev, [id]: finalValue }));
   };
 
-  const handleSelectChange = value => {
-    setCrmvState(value);
+  const handleSelectChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleProfilePicChange = e => {
-    const file = e.target.files[0];
-    if (file) {
-      // Check file size (limit to ~1MB for base64 safety in TEXT columns)
-      if (file.size > 1024 * 1024) {
-          toast({
-              title: "Arquivo muito grande",
-              description: "A imagem deve ter no máximo 1MB.",
-              variant: "destructive"
-          });
-          return;
+  // 3. Busca de CEP
+  const handleCepBlur = async () => {
+    const cep = formData.cep.replace(/\D/g, '');
+    if (cep.length !== 8) return;
+
+    setLoadingCep(true);
+    try {
+      const response = await fetch(`https://viacep.com.br/ws/${cep}/json/`);
+      const data = await response.json();
+      if (!data.erro) {
+        setFormData(prev => ({
+          ...prev,
+          address: data.logradouro,
+          neighborhood: data.bairro,
+          city: data.localidade,
+          state: data.uf
+        }));
+        toast({ title: "Endereço encontrado", description: "Campos preenchidos automaticamente." });
       }
-
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        setProfilePic(reader.result);
-      };
-      reader.readAsDataURL(file);
+    } catch (error) {
+      console.error("Erro CEP:", error);
+    } finally {
+      setLoadingCep(false);
     }
   };
 
-  const handleRemoveProfilePic = () => {
-    setProfilePic(null);
-    if (fileInputRef.current) fileInputRef.current.value = null; 
-  };
-
+  // 4. Salvar no Supabase
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (user.cpf && !validateCPF(user.cpf)) {
-      toast({
-        title: "Erro na atualização",
-        description: "O CPF informado é inválido.",
-        variant: "destructive"
-      });
-      return;
-    }
-    
     setIsSaving(true);
 
     try {
-      const fullCrmv = crmvState && crmvNumber ? `CRMV-${crmvState} ${crmvNumber}` : '';
-      
-      const profileData = {
-        name: user.name,
+      const fullCrmv = formData.crmvState && formData.crmvNumber 
+        ? `CRMV-${formData.crmvState} ${formData.crmvNumber}` 
+        : formData.crmvNumber;
+
+      const updates = {
+        name: formData.name,
+        phone: formData.phone,
+        cpf_cnpj: formData.cpf_cnpj,
         crmv: fullCrmv,
-        cpf: user.cpf,
-        phone: phone,
-        specialty: specialty,
-        address: user.address,
-        sipegro: sipegro,
-        profile_pic_url: profilePic, 
-        email: session?.user?.email || user.email
+        sipegro: formData.sipegro,
+        clinic_name: formData.clinic_name,
+        cep: formData.cep,
+        address: formData.address,
+        number: formData.number,
+        neighborhood: formData.neighborhood,
+        city: formData.city,
+        state: formData.state,
+        updated_at: new Date()
       };
 
-      // 1. Save to Supabase
-      if (session?.user?.id) {
-        // Check if profile exists to determine if we need to set created_at
-        // This prevents constraint violations if the column is NOT NULL with no default
-        const { data: existingProfile } = await supabase
-            .from('profiles')
-            .select('id')
-            .eq('id', session.user.id)
-            .maybeSingle();
+      const { error } = await supabase
+        .from('profiles')
+        .update(updates)
+        .eq('id', session.user.id);
 
-        const upsertData = {
-            id: session.user.id,
-            ...profileData,
-            updated_at: new Date().toISOString()
-        };
+      if (error) throw error;
 
-        if (!existingProfile) {
-            upsertData.created_at = new Date().toISOString();
-        }
-
-        const { error } = await supabase
-          .from('profiles')
-          .upsert(upsertData);
-          
-        if (error) throw error;
-      }
-
-      // 2. Save to LocalStorage (Legacy Compatibility/Offline Backup)
-      const legacyUser = {
-        ...user,
-        ...profileData,
-        profilePic: profilePic // legacy key name
-      };
-      localStorage.setItem('rdv_user', JSON.stringify(legacyUser));
-      
-      // Update users list (Legacy)
-      const allUsers = JSON.parse(localStorage.getItem('rdv_users') || '[]');
-      const userIndex = allUsers.findIndex(u => u.email === legacyUser.email);
-      if (userIndex > -1) {
-        allUsers[userIndex] = { ...allUsers[userIndex], ...legacyUser };
-        localStorage.setItem('rdv_users', JSON.stringify(allUsers));
-      }
-
-      toast({
-        title: "Perfil atualizado!",
-        description: "Suas informações foram salvas com sucesso."
-      });
-      
+      toast({ title: "Perfil atualizado!", description: "Seus dados foram salvos com sucesso." });
       setTimeout(() => navigate('/dashboard'), 1000);
 
     } catch (error) {
-      console.error('Error saving profile:', error);
-      toast({
-        title: "Erro ao salvar",
-        description: error.message || "Ocorreu um erro ao salvar seus dados. Tente novamente.",
-        variant: "destructive"
-      });
+      toast({ variant: "destructive", title: "Erro ao salvar", description: error.message });
     } finally {
       setIsSaving(false);
     }
   };
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-background">
-        <Loader2 className="w-8 h-8 animate-spin text-primary" />
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center bg-background"><Loader2 className="w-8 h-8 animate-spin text-primary" /></div>;
   }
 
   return (
@@ -254,169 +205,117 @@ const ProfileSettings = () => {
           <form onSubmit={handleSubmit}>
             <Card className="glass-effect border-border">
               <CardHeader>
-                <div className="flex items-center space-x-6">
-                  <div className="relative group">
-                    <div 
-                      className="w-24 h-24 rounded-full bg-muted flex items-center justify-center cursor-pointer overflow-hidden border-2 border-border" 
-                      onClick={() => fileInputRef.current.click()}
-                    >
-                      {profilePic ? (
-                        <img src={profilePic} alt="Foto de Perfil" className="w-full h-full object-cover" />
-                      ) : (
-                        <Camera className="w-10 h-10 text-muted-foreground" />
-                      )}
-                    </div>
-                    <input 
-                      type="file" 
-                      ref={fileInputRef} 
-                      className="hidden" 
-                      accept="image/*" 
-                      onChange={handleProfilePicChange} 
-                    />
-                    {profilePic && (
-                      <Button
-                        type="button"
-                        variant="destructive"
-                        size="icon"
-                        className="absolute -top-2 -right-2 h-8 w-8 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"
-                        onClick={handleRemoveProfilePic}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                  <div>
-                    <CardTitle>Informações do Veterinário</CardTitle>
-                    <CardDescription>Estes dados aparecerão em todas as prescrições emitidas.</CardDescription>
-                  </div>
-                </div>
+                <CardTitle>Informações do Veterinário</CardTitle>
+                <CardDescription>Estes dados aparecerão em todas as prescrições emitidas.</CardDescription>
               </CardHeader>
               <CardContent className="space-y-6">
+                
+                {/* Nome e Clínica */}
                 <div className="space-y-2">
-                  <Label htmlFor="name" className="text-foreground">Nome Completo *</Label>
-                  <Input 
-                    id="name" 
-                    value={user.name || ''} 
-                    onChange={handleInputChange} 
-                    className="bg-input border-border text-foreground" 
-                    required 
-                  />
+                  <Label htmlFor="name">Nome Completo *</Label>
+                  <Input id="name" value={formData.name} onChange={handleChange} required className="bg-input border-border text-foreground" />
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="specialty" className="text-foreground">Especialidade</Label>
-                  <Input 
-                    id="specialty" 
-                    value={specialty} 
-                    onChange={e => setSpecialty(e.target.value)} 
-                    placeholder="Ex: Clínica Geral, Dermatologia, Ortopedia" 
-                    className="bg-input border-border text-foreground" 
-                  />
+                  <Label htmlFor="clinic_name">Nome da Clínica / Fantasia</Label>
+                  <Input id="clinic_name" value={formData.clinic_name} onChange={handleChange} placeholder="Ex: Clínica Veterinária Pet Feliz" className="bg-input border-border text-foreground" />
                 </div>
                 
+                {/* Dados de Registro (CRMV/SIPEGRO) */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                   <div className="grid grid-cols-3 gap-2">
                     <div className="space-y-2 md:col-span-1">
-                      <Label htmlFor="crmvState">Estado *</Label>
-                      <Select onValueChange={handleSelectChange} value={crmvState} required>
-                        <SelectTrigger id="crmvState" className="bg-input border-border text-foreground">
-                          <SelectValue placeholder="UF" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {brazilianStates.map(state => (
-                            <SelectItem key={state.value} value={state.value}>{state.label}</SelectItem>
-                          ))}
-                        </SelectContent>
+                      <Label htmlFor="crmvState">UF *</Label>
+                      <Select value={formData.crmvState} onValueChange={(v) => handleSelectChange('crmvState', v)}>
+                        <SelectTrigger className="bg-input border-border text-foreground"><SelectValue placeholder="UF" /></SelectTrigger>
+                        <SelectContent>{brazilianStates.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
                       </Select>
                     </div>
                     <div className="space-y-2 md:col-span-2">
-                      <Label htmlFor="crmvNumber" className="text-foreground">Nº CRMV *</Label>
-                      <Input 
-                        id="crmvNumber" 
-                        value={crmvNumber} 
-                        onChange={e => setCrmvNumber(e.target.value)} 
-                        className="bg-input border-border text-foreground" 
-                        required 
-                      />
+                      <Label htmlFor="crmvNumber">Nº CRMV *</Label>
+                      <Input id="crmvNumber" value={formData.crmvNumber} onChange={handleChange} required className="bg-input border-border text-foreground" />
                     </div>
                   </div>
+
                   <div className="space-y-2">
                     <div className="flex items-center space-x-2">
-                      <Label htmlFor="sipegro" className="text-foreground">Nº SIPEGRO (Mapa)</Label>
+                      <Label htmlFor="sipegro">Nº SIPEGRO (Mapa)</Label>
                       <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-5 w-5">
-                            <Info className="h-4 w-4 text-muted-foreground cursor-pointer" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-80">
-                          <p className="text-sm">
-                            Para saber seu número de registro, acesse o menu "Produtos", "Relatórios" e selecione o subitem "Emitir Relatório de Dados Gerais do Produto", e consulte o(s) produtos cadastrados.
-                          </p>
-                        </PopoverContent>
+                        <PopoverTrigger asChild><Button variant="ghost" size="icon" className="h-5 w-5"><Info className="h-4 w-4 text-muted-foreground" /></Button></PopoverTrigger>
+                        <PopoverContent className="w-80"><p className="text-sm">Para receitas controladas, consulte seu registro no sistema do MAPA.</p></PopoverContent>
                       </Popover>
                     </div>
-                    <Input 
-                        id="sipegro" 
-                        value={sipegro} 
-                        onChange={e => setSipegro(e.target.value)} 
-                        className="bg-input border-border text-foreground" 
-                    />
+                    <Input id="sipegro" value={formData.sipegro} onChange={handleChange} className="bg-input border-border text-foreground" />
                   </div>
                 </div>
 
+                {/* Contatos e Documentos */}
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <div className="space-y-2">
-                      <Label htmlFor="email" className="text-foreground">Email Profissional</Label>
-                      <Input 
-                        id="email" 
-                        type="email" 
-                        value={user.email || ''} 
-                        onChange={handleInputChange} 
-                        className="bg-input border-border text-foreground" 
-                        disabled 
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="phone" className="text-foreground">Telefone / Whatsapp *</Label>
-                      <Input 
-                        id="phone" 
-                        value={phone} 
-                        onChange={e => setPhone(e.target.value)} 
-                        placeholder="(00) 00000-0000" 
-                        className="bg-input border-border text-foreground" 
-                        required 
-                      />
-                    </div>
+                   <div className="space-y-2">
+                    <Label htmlFor="email">Email de Login</Label>
+                    <Input id="email" value={formData.email} disabled className="bg-muted border-border text-muted-foreground" />
+                  </div>
+                   <div className="space-y-2">
+                    <Label htmlFor="phone">Telefone / Whatsapp *</Label>
+                    <Input id="phone" value={formData.phone} onChange={handleChange} required placeholder="(00) 00000-0000" className="bg-input border-border text-foreground" />
+                  </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="cpf" className="text-foreground">CPF</Label>
-                  <Input 
-                    id="cpf" 
-                    value={user.cpf || ''} 
-                    onChange={handleInputChange} 
-                    placeholder="123.456.789-00" 
-                    className="bg-input border-border text-foreground" 
-                  />
+                  <Label htmlFor="cpf_cnpj">CPF ou CNPJ</Label>
+                  <Input id="cpf_cnpj" value={formData.cpf_cnpj} onChange={handleChange} placeholder="000.000.000-00" className="bg-input border-border text-foreground" />
                 </div>
-                <div className="space-y-2">
-                  <Label htmlFor="address" className="text-foreground">Endereço Completo (Clínica/Consultório)</Label>
-                  <Input 
-                    id="address" 
-                    value={user.address || ''} 
-                    onChange={handleInputChange} 
-                    placeholder="Rua, Número, Bairro - Cidade - UF" 
-                    className="bg-input border-border text-foreground" 
-                  />
+
+                {/* Endereço */}
+                <div className="border-t border-border pt-4 mt-4">
+                  <h3 className="text-md font-semibold mb-4 text-foreground">Endereço da Clínica</h3>
+                  
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="col-span-1 space-y-2">
+                      <Label htmlFor="cep">CEP</Label>
+                      <div className="relative">
+                        <Input id="cep" value={formData.cep} onChange={handleChange} onBlur={handleCepBlur} placeholder="00000-000" className="bg-input border-border text-foreground pr-8" />
+                        {loadingCep && <Loader2 className="w-4 h-4 absolute right-2 top-3 animate-spin text-muted-foreground" />}
+                      </div>
+                    </div>
+                    <div className="col-span-2 space-y-2">
+                      <Label htmlFor="address">Rua / Logradouro</Label>
+                      <Input id="address" value={formData.address} onChange={handleChange} className="bg-input border-border text-foreground" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4 mb-4">
+                    <div className="col-span-1 space-y-2">
+                      <Label htmlFor="number">Número</Label>
+                      <Input id="number" value={formData.number} onChange={handleChange} className="bg-input border-border text-foreground" />
+                    </div>
+                    <div className="col-span-2 space-y-2">
+                      <Label htmlFor="neighborhood">Bairro</Label>
+                      <Input id="neighborhood" value={formData.neighborhood} onChange={handleChange} className="bg-input border-border text-foreground" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="col-span-2 space-y-2">
+                      <Label htmlFor="city">Cidade</Label>
+                      <Input id="city" value={formData.city} onChange={handleChange} className="bg-input border-border text-foreground" />
+                    </div>
+                    <div className="col-span-1 space-y-2">
+                      <Label htmlFor="state">UF</Label>
+                      <Select value={formData.state} onValueChange={(v) => handleSelectChange('state', v)}>
+                        <SelectTrigger className="bg-input border-border text-foreground"><SelectValue placeholder="UF" /></SelectTrigger>
+                        <SelectContent>{brazilianStates.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                  </div>
                 </div>
-                
+
               </CardContent>
               <CardFooter className="flex justify-end">
                 <Button 
-                    type="submit" 
-                    disabled={isSaving} 
-                    className="bg-gradient-to-r from-primary to-secondary hover:from-primary/90 hover:to-secondary/90 text-white font-semibold"
+                  type="submit" 
+                  disabled={isSaving} 
+                  className="bg-gradient-to-r from-primary to-secondary hover:from-primary/90 hover:to-secondary/90 text-white font-semibold"
                 >
                   {isSaving ? <Loader2 className="w-4 h-4 mr-2 animate-spin" /> : <Save className="w-4 h-4 mr-2" />}
                   Salvar Alterações

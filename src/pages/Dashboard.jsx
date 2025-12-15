@@ -3,12 +3,15 @@ import { motion } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Users, PawPrint, FileText, Calendar, LogOut, Settings, CreditCard, User, LifeBuoy } from 'lucide-react';
-import { isToday } from 'date-fns';
+import { Users, PawPrint, FileText, Calendar, LogOut, CreditCard, User, LifeBuoy } from 'lucide-react';
+import { useAuth } from '@/contexts/SupabaseAuthContext.jsx';
+import { supabase } from '@/lib/customSupabaseClient';
 
 const Dashboard = () => {
   const navigate = useNavigate();
-  const [user, setUser] = useState({});
+  const { signOut, user: authUser } = useAuth(); // Pegamos o usuário autenticado do contexto
+  
+  const [profile, setProfile] = useState({});
   const [stats, setStats] = useState([
     { title: 'Tutores Cadastrados', value: 0, icon: Users, color: 'from-primary to-blue-500', target: '/tutors' },
     { title: 'Pacientes Ativos', value: 0, icon: PawPrint, color: 'from-secondary to-green-500', target: '/tutors' },
@@ -17,56 +20,88 @@ const Dashboard = () => {
   ]);
 
   useEffect(() => {
-    const loadedUser = JSON.parse(localStorage.getItem('rdv_user') || '{}');
-    setUser(loadedUser);
-    
-    const fetchStats = () => {
-      const tutors = JSON.parse(localStorage.getItem('rdv_tutors') || '[]');
-      const patients = JSON.parse(localStorage.getItem('rdv_patients') || '[]');
-      const prescriptions = JSON.parse(localStorage.getItem('rdv_prescriptions') || '[]');
-      const appointments = JSON.parse(localStorage.getItem('rdv_appointments') || '[]');
+    // Função para carregar os dados reais do Supabase
+    const loadDashboardData = async () => {
+      if (!authUser?.id) return;
 
-      const todayPrescriptions = prescriptions.filter(p => isToday(new Date(p.date))).length;
-      const todayAppointments = appointments.filter(a => isToday(new Date(a.date))).length;
+      try {
+        // 1. Carregar Perfil do Veterinário (Nome, CRMV)
+        const { data: profileData } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', authUser.id)
+          .single();
+        
+        if (profileData) {
+          setProfile(profileData);
+        }
 
-      setStats([
-        { title: 'Tutores Cadastrados', value: tutors.length, icon: Users, color: 'from-primary to-blue-500', target: '/tutors' },
-        { title: 'Pacientes Ativos', value: patients.length, icon: PawPrint, color: 'from-secondary to-green-500', target: '/tutors' },
-        { title: 'Prescrições Hoje', value: todayPrescriptions, icon: FileText, color: 'from-purple-500 to-purple-600', target: '/tutors' },
-        { title: 'Consultas Agendadas', value: todayAppointments, icon: Calendar, color: 'from-accent to-orange-500', target: '/scheduler' },
-      ]);
+        // 2. Carregar Estatísticas (Counts)
+        // Usamos { count: 'exact', head: true } para ser rápido e não baixar os dados, só contar.
+        
+        // Total Tutores
+        const { count: tutorsCount } = await supabase
+          .from('tutors')
+          .select('*', { count: 'exact', head: true })
+          .eq('veterinarian_id', authUser.id);
+
+        // Total Pacientes
+        const { count: patientsCount } = await supabase
+          .from('patients')
+          .select('*', { count: 'exact', head: true })
+          .eq('veterinarian_id', authUser.id);
+
+        // Prescrições de HOJE
+        const todayStr = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+        const { count: prescriptionsToday } = await supabase
+          .from('prescriptions')
+          .select('*', { count: 'exact', head: true })
+          .eq('veterinarian_id', authUser.id)
+          .gte('created_at', `${todayStr}T00:00:00`)
+          .lte('created_at', `${todayStr}T23:59:59`);
+
+        // Agendamentos de HOJE
+        const { count: appointmentsToday } = await supabase
+          .from('appointments')
+          .select('*', { count: 'exact', head: true })
+          .eq('veterinarian_id', authUser.id)
+          .gte('start_time', `${todayStr}T00:00:00`)
+          .lte('start_time', `${todayStr}T23:59:59`);
+
+        // Atualiza o estado
+        setStats([
+          { title: 'Tutores Cadastrados', value: tutorsCount || 0, icon: Users, color: 'from-primary to-blue-500', target: '/tutors' },
+          { title: 'Pacientes Ativos', value: patientsCount || 0, icon: PawPrint, color: 'from-secondary to-green-500', target: '/tutors' },
+          { title: 'Prescrições Hoje', value: prescriptionsToday || 0, icon: FileText, color: 'from-purple-500 to-purple-600', target: '/tutors' },
+          { title: 'Consultas Hoje', value: appointmentsToday || 0, icon: Calendar, color: 'from-accent to-orange-500', target: '/scheduler' },
+        ]);
+
+      } catch (error) {
+        console.error("Erro ao carregar dashboard:", error);
+      }
     };
 
-    fetchStats();
+    loadDashboardData();
+  }, [authUser]);
 
-    const handleStorageChange = () => {
-        fetchStats();
-    };
-
-    window.addEventListener('storage', handleStorageChange);
-    window.addEventListener('focus', fetchStats);
-
-    return () => {
-        window.removeEventListener('storage', handleStorageChange);
-        window.removeEventListener('focus', fetchStats);
-    };
-
-  }, []);
-
-  const handleLogout = () => {
-    localStorage.removeItem('rdv_user');
-    navigate('/');
+  // Função de Logout Atualizada
+  const handleLogout = async () => {
+    await signOut(); // Desloga do Supabase
+    navigate('/');   // Manda para o login
   };
 
   return (
     <div className="min-h-screen p-6 bg-background">
       <div className="max-w-7xl mx-auto">
+        {/* Header */}
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="flex justify-between items-center mb-8">
           <div className="flex items-center space-x-4">
             <img src="https://horizons-cdn.hostinger.com/2cba84cd-67f6-4ccb-a719-f85b6f3bc4fa/c026dd484579f330e8e56c64a75211c9.png" alt="Logo RDV Receita Digital Veterinária" className="h-24 w-auto" />
             <div>
               <h1 className="text-4xl font-bold text-foreground mb-2">Painel</h1>
-              <p className="text-muted-foreground">Bem-vindo, {user.name} - {user.crmv}</p>
+              <p className="text-muted-foreground">
+                Bem-vindo, {profile.name || 'Doutor(a)'} {profile.crmv ? `- ${profile.crmv}` : ''}
+              </p>
             </div>
           </div>
           <div className="flex items-center space-x-2">
@@ -74,7 +109,6 @@ const Dashboard = () => {
               <CreditCard className="w-4 h-4 mr-2" />
               Assinatura
             </Button>
-            {/* Removed redundant Profile Settings button from header, moved to Quick Actions */}
             <Button onClick={handleLogout} variant="outline" className="bg-transparent border-border text-foreground hover:bg-muted">
               <LogOut className="w-4 h-4 mr-2" />
               Sair
@@ -82,6 +116,7 @@ const Dashboard = () => {
           </div>
         </motion.div>
 
+        {/* Ações Rápidas */}
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }} className="mb-8">
           <Card className="glass-effect border-border">
             <CardHeader>
@@ -105,7 +140,7 @@ const Dashboard = () => {
                   </div>
                 </Button>
                 
-                {/* 3. Gerenciar Pacientes (Navigate to tutors list to select a tutor first) */}
+                {/* 3. Gerenciar Pacientes */}
                 <Button onClick={() => navigate('/tutors')} className="h-20 bg-gradient-to-r from-secondary to-green-500 hover:from-secondary/90 hover:to-green-600 text-white font-semibold">
                   <div className="flex flex-col items-center space-y-2">
                     <PawPrint className="w-6 h-6" />
@@ -113,7 +148,7 @@ const Dashboard = () => {
                   </div>
                 </Button>
 
-                {/* 4. Nova Prescrição (Navigate to tutors list to select a patient first) */}
+                {/* 4. Nova Prescrição */}
                 <Button onClick={() => navigate('/tutors')} className="h-20 bg-gradient-to-r from-purple-500 to-purple-600 hover:from-purple-600 hover:to-purple-700 text-white font-semibold">
                   <div className="flex flex-col items-center space-y-2">
                     <FileText className="w-6 h-6" />
@@ -144,6 +179,7 @@ const Dashboard = () => {
           </Card>
         </motion.div>
 
+        {/* Estatísticas */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
           {stats.map((stat, index) => (
             <motion.div key={stat.title} initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.1 }}>

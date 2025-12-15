@@ -19,11 +19,31 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const getSession = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      handleSession(session);
+      // 1. Pega a sessão do cache local
+      const { data: { session: localSession } } = await supabase.auth.getSession();
+      
+      if (localSession?.user) {
+        // 2. BLINDAGEM: Verifica no servidor se o usuário ainda existe
+        const { data: { user }, error } = await supabase.auth.getUser();
+        
+        if (error || !user) {
+          // Se der erro (usuário deletado), forçamos logout
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+        } else {
+          // Se tudo ok, segue o jogo
+          handleSession(localSession);
+        }
+      } else {
+         handleSession(null);
+      }
+      setLoading(false);
     };
 
     getSession();
+    
+    // ... resto do código (subscription) ...
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
@@ -63,10 +83,11 @@ export const AuthProvider = ({ children }) => {
     });
 
     if (error) {
+      console.error("ERRO REAL DO SUPABASE:", error); // <--- ADICIONE ISSO
       toast({
         variant: "destructive",
         title: "Falha no login",
-        description: "Credenciais inválidas. Verifique seu e-mail e senha.",
+        description: "Credenciais inválidas ou e-mail não confirmado.", // <--- ATUALIZE A MENSAGEM
       });
     }
 
