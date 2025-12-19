@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '@/lib/customSupabaseClient';
 import { useToast } from '@/components/ui/use-toast';
 
@@ -6,146 +6,128 @@ const AuthContext = createContext(undefined);
 
 export const AuthProvider = ({ children }) => {
   const { toast } = useToast();
-
-  const [user, setUser] = useState(null);
   const [session, setSession] = useState(null);
+  const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  const handleSession = useCallback(async (session) => {
-    setSession(session);
-    setUser(session?.user ?? null);
-    setLoading(false);
-  }, []);
-
   useEffect(() => {
-    const getSession = async () => {
-      // 1. Pega a sessão do cache local
-      const { data: { session: localSession } } = await supabase.auth.getSession();
-      
-      if (localSession?.user) {
-        // 2. BLINDAGEM: Verifica no servidor se o usuário ainda existe
-        const { data: { user }, error } = await supabase.auth.getUser();
-        
-        if (error || !user) {
-          // Se der erro (usuário deletado), forçamos logout
-          await supabase.auth.signOut();
-          setSession(null);
-          setUser(null);
-        } else {
-          // Se tudo ok, segue o jogo
-          handleSession(localSession);
+    let mounted = true;
+    let authProcessed = false;
+
+    const initializeAuth = async () => {
+      try {
+        const hash = window.location.hash;
+        const hasAuthHash = hash && (
+          hash.includes('access_token=') || 
+          hash.includes('type=recovery') ||
+          hash.includes('type=signup')
+        );
+
+        // Se tiver hash, aguarda o evento de autenticação
+        if (hasAuthHash) {
+          console.log('🔐 Hash detectado, aguardando processamento...');
+          
+          // Timeout de segurança: se não processar em 3s, continua
+          const timeout = setTimeout(() => {
+            if (!authProcessed && mounted) {
+              console.warn('⚠️ Timeout ao processar hash');
+              setLoading(false);
+            }
+          }, 3000);
+
+          // Aguarda o evento SIGNED_IN ou PASSWORD_RECOVERY
+          const cleanup = supabase.auth.onAuthStateChange((event) => {
+            if (event === 'SIGNED_IN' || event === 'PASSWORD_RECOVERY') {
+              authProcessed = true;
+              clearTimeout(timeout);
+            }
+          });
+
+          // Aguarda um pouco para o evento disparar
+          await new Promise(resolve => setTimeout(resolve, 1000));
         }
-      } else {
-         handleSession(null);
+
+        // Pega a sessão atual
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        
+        if (mounted) {
+          if (initialSession) {
+            console.log('✅ Sessão encontrada');
+            setSession(initialSession);
+            setUser(initialSession.user);
+          } else {
+            console.log('❌ Nenhuma sessão');
+          }
+        }
+      } catch (error) {
+        console.error("Erro na inicialização:", error);
+      } finally {
+        if (mounted) {
+          setLoading(false);
+        }
       }
-      setLoading(false);
     };
 
-    getSession();
-    
-    // ... resto do código (subscription) ...
+    initializeAuth();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (event, session) => {
-        handleSession(session);
-        if (event === 'PASSWORD_RECOVERY') {
-          // The user is in a password recovery state.
-          // You can redirect them to a password reset page here.
-        }
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+      if (mounted) {
+        console.log('🔄 Auth event:', event);
+        setSession(newSession);
+        setUser(newSession?.user ?? null);
+        setLoading(false);
       }
-    );
-
-    return () => subscription.unsubscribe();
-  }, [handleSession]);
-
-  const signUp = useCallback(async (email, password, options) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options,
     });
 
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Falha no cadastro",
-        description: error.message || "Algo deu errado",
-      });
-    }
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, []);
 
-    return { data, error };
-  }, [toast]);
+  const signUp = async (email, password, options) => {
+    const result = await supabase.auth.signUp({ email, password, options });
+    if (result.error) toast({ variant: "destructive", title: "Erro no Cadastro", description: result.error.message });
+    return result;
+  };
 
-  const signIn = useCallback(async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+  const signIn = async (email, password) => {
+    const result = await supabase.auth.signInWithPassword({ email, password });
+    if (result.error) toast({ variant: "destructive", title: "Erro no Login", description: "Credenciais inválidas." });
+    return result;
+  };
 
-    if (error) {
-      console.error("ERRO REAL DO SUPABASE:", error); // <--- ADICIONE ISSO
-      toast({
-        variant: "destructive",
-        title: "Falha no login",
-        description: "Credenciais inválidas ou e-mail não confirmado.", // <--- ATUALIZE A MENSAGEM
-      });
-    }
+  const signOut = async () => {
+    const result = await supabase.auth.signOut();
+    setSession(null);
+    setUser(null);
+    return result;
+  };
 
-    return { data, error };
-  }, [toast]);
-
-  const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Falha ao sair",
-        description: error.message || "Algo deu errado",
-      });
-    }
-
-    return { error };
-  }, [toast]);
-
-  const sendPasswordResetEmail = useCallback(async (email) => {
-    const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+  const sendPasswordResetEmail = async (email) => {
+    const result = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: `${window.location.origin}/reset-password`,
     });
+    if (result.error) toast({ variant: "destructive", title: "Erro", description: result.error.message });
+    return result;
+  };
 
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Falha ao enviar e-mail",
-        description: error.message || "Algo deu errado",
-      });
-    }
-    return { data, error };
-  }, [toast]);
+  const updatePassword = async (newPassword) => {
+    const result = await supabase.auth.updateUser({ password: newPassword });
+    if (result.error) toast({ variant: "destructive", title: "Erro", description: result.error.message });
+    return result;
+  };
 
-  const updatePassword = useCallback(async (newPassword) => {
-    const { data, error } = await supabase.auth.updateUser({ password: newPassword });
-
-    if (error) {
-      toast({
-        variant: "destructive",
-        title: "Falha ao atualizar senha",
-        description: error.message || "Algo deu errado",
-      });
-    }
-    return { data, error };
-  }, [toast]);
-
-  const value = useMemo(() => ({
-    user,
+  const value = {
     session,
+    user,
     loading,
     signUp,
     signIn,
     signOut,
     sendPasswordResetEmail,
     updatePassword,
-  }), [user, session, loading, signUp, signIn, signOut, sendPasswordResetEmail, updatePassword]);
+  };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };

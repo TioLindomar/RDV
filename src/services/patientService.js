@@ -1,48 +1,37 @@
 import { supabase } from '@/lib/customSupabaseClient';
 
-export const tutorService = {
-  // Listar todos os tutores (O RLS do banco já filtra pela organização)
-  async getAll() {
+export const patientService = {
+  // Listar pacientes de um tutor
+  async getByTutorId(tutorId) {
     const { data, error } = await supabase
-      .from('tutors')
+      .from('patients')
       .select('*')
+      .eq('tutor_id', tutorId)
       .order('name');
     
     if (error) throw error;
     return data;
   },
 
-  // Buscar tutor por ID
-  async getById(id) {
-    const { data, error } = await supabase
-      .from('tutors')
-      .select('*')
-      .eq('id', id)
-      .single();
-      
-    if (error) throw error;
-    return data;
-  },
-
-  // Criar novo tutor (Vinculado à Organização)
-  async create(tutorData) {
+  // Criar paciente (Vinculado à Organização)
+  async create(patientData) {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) throw new Error("Usuário não autenticado");
 
-    // 1. Descobre a Organização do usuário
+    // 1. Pega a Org ID
     const { data: profile } = await supabase
       .from('profiles')
       .select('organization_id')
       .eq('id', user.id)
       .single();
 
-    if (!profile?.organization_id) throw new Error("Erro de permissão: Sem organização.");
+    if (!profile?.organization_id) throw new Error("Erro de permissão.");
 
-    // 2. Cria o registro vinculado à organização
+    // 2. Cria com Org ID
     const { data, error } = await supabase
-      .from('tutors')
+      .from('patients')
       .insert([{
-        ...tutorData,
+        ...patientData,
         organization_id: profile.organization_id, // Chave do SaaS
         created_by: user.id
       }])
@@ -53,11 +42,10 @@ export const tutorService = {
     return data;
   },
 
-  // Atualizar tutor
-  async update(id, tutorData) {
+  async update(id, patientData) {
     const { data, error } = await supabase
-      .from('tutors')
-      .update(tutorData)
+      .from('patients')
+      .update(patientData)
       .eq('id', id)
       .select()
       .single();
@@ -66,10 +54,9 @@ export const tutorService = {
     return data;
   },
 
-  // Deletar tutor
   async delete(id) {
     const { error } = await supabase
-      .from('tutors')
+      .from('patients')
       .delete()
       .eq('id', id);
 
